@@ -9,8 +9,9 @@ namespace Ursaanimation.CubicFarmAnimals
     {
         /* ───────── baseline tunables (private) ───────── */
 
-        // Movement & steering
-        [SerializeField] private float baseMaxSpeed        = 3.8f;  // slightly faster
+        // Movement & steering (baseline – each sheep will receive a randomised copy)
+        // 3 m/s when ambling, 4.5 m/s when trotting in the flock
+        [SerializeField] private float baseMaxSpeed        = 4.5f;  // top trot speed
         [SerializeField] private float baseMaxForce        = 6f;
         [SerializeField] private float baseNeighbourRadius = 6f;
 
@@ -33,6 +34,12 @@ namespace Ursaanimation.CubicFarmAnimals
         [SerializeField] private float baseMinSitTime = 20f;  // seconds
         [SerializeField] private float baseMaxSitTime = 60f;
 
+        /* Transition & comfort factors */
+        [Header("Behaviour Modifiers")]
+        [SerializeField] private float slowSpeedFactor  = 0.667f; // 3.0 / 4.5 when alone or just stood up
+        [SerializeField] private float standUpSlowTime  = 3f;     // time (s) sheep stays slow after standing
+        [SerializeField] private float obstacleAvoidFactor = 0.1f;// sitting‑sheep avoidance radius factor (much smaller)
+
         [Header("Animation")]
         [SerializeField] private string walkForwardAnimation = "walk_forward";
         [SerializeField] private string standToSitAnimation  = "stand_to_sit";
@@ -49,7 +56,7 @@ namespace Ursaanimation.CubicFarmAnimals
         private int   maxNeighboursForFullCohesion;
         // wander noise
         private float jitterStrength;
-        // resting
+        // resting parameters
         private float sitCheckInterval, sitProbability, minSitTime, maxSitTime;
 
         private static readonly List<SheepController> _flock = new();
@@ -57,6 +64,10 @@ namespace Ursaanimation.CubicFarmAnimals
         private Vector3 _velocity;
         private Animator _anim;
         private bool _isSitting;
+
+        // dynamic state
+        private float _standSlowTimer = 0f;
+        private int   _lastNeighbourCount = 0;
 
         /* ---- personality variance constants ---- */
         private const float PARAM_VARIANCE   = 0.25f;
@@ -94,8 +105,8 @@ namespace Ursaanimation.CubicFarmAnimals
             minSitTime       = V(baseMinSitTime);
             maxSitTime       = V(baseMaxSitTime);
 
-            // Initial velocity & registration
-            _velocity = Quaternion.Euler(0, Random.Range(0, 360f), 0) * Vector3.forward * maxSpeed * 0.5f;
+            // Initial velocity — start at slowSpeedFactor * maxSpeed ≈ 3 m/s
+            _velocity = Quaternion.Euler(0, Random.Range(0, 360f), 0) * Vector3.forward * maxSpeed * slowSpeedFactor;
             _anim     = GetComponent<Animator>();
 
             _flock.Add(this);
@@ -126,7 +137,11 @@ namespace Ursaanimation.CubicFarmAnimals
             Vector3 jitter = Random.insideUnitSphere; jitter.y = 0f;
             steer += jitter * maxForce * jitterStrength;
 
-            _velocity = Vector3.ClampMagnitude(_velocity + steer * Time.deltaTime, maxSpeed);
+            // Speed regulation
+            _standSlowTimer = Mathf.Max(0f, _standSlowTimer - Time.deltaTime);
+            float targetMax = (_lastNeighbourCount >= 2 && _standSlowTimer <= 0f) ? maxSpeed : maxSpeed * slowSpeedFactor;
+
+            _velocity = Vector3.ClampMagnitude(_velocity + steer * Time.deltaTime, targetMax);
             if (_velocity.sqrMagnitude < 0.0001f) return;
 
             transform.position += _velocity * Time.deltaTime;
@@ -149,6 +164,8 @@ namespace Ursaanimation.CubicFarmAnimals
             Vector3 cohesion   = Vector3.zero;
             int neighbourCount = 0;
 
+            float obstacleAvoidRadius = neighbourRadius * obstacleAvoidFactor;
+
             foreach (SheepController other in _flock)
             {
                 if (other == this) continue;
@@ -160,8 +177,11 @@ namespace Ursaanimation.CubicFarmAnimals
 
                 if (other._isSitting)
                 {
-                    // obstacle – strong repulsion, no alignment/cohesion
-                    separation += (-toOther.normalized) * Mathf.Clamp01((neighbourRadius - dist) / neighbourRadius);
+                    // keep minimal distance from resting sheep
+                    if (dist < obstacleAvoidRadius)
+                    {
+                        separation += (-toOther.normalized) * ((obstacleAvoidRadius - dist) / obstacleAvoidRadius);
+                    }
                     continue;
                 }
 
@@ -181,6 +201,8 @@ namespace Ursaanimation.CubicFarmAnimals
                     separation += (-toOther.normalized) * strength;
                 }
             }
+
+            _lastNeighbourCount = neighbourCount; // for speed control
 
             if (neighbourCount == 0 && separation == Vector3.zero)
                 return Vector3.zero;
@@ -236,6 +258,7 @@ namespace Ursaanimation.CubicFarmAnimals
             yield return new WaitForSeconds(1f);
 
             _isSitting = false;
+            _standSlowTimer = standUpSlowTime; // start slow for a short duration
         }
     }
 }
