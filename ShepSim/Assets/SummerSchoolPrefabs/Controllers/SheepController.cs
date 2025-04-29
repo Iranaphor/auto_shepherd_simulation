@@ -1,163 +1,149 @@
+using System.Collections.Generic;
 using UnityEngine;
-using System.Collections;
 
 namespace Ursaanimation.CubicFarmAnimals
 {
+    [RequireComponent(typeof(Animator))]
     public class SheepController : MonoBehaviour
     {
-        [Header("Movement Settings")]
-        public float speed = 2f;                  // Movement speed (units per second)
-        public float rotationSpeed = 5f;          // How quickly the sheep rotates to face direction of travel
-        public float stoppingThreshold = 0.3f;    // Distance at which we consider the sheep to have arrived
+        /* ───────── private base settings ───────── */
+        // Movement & steering
+        [SerializeField] private float baseMaxSpeed         = 3.5f;
+        [SerializeField] private float baseMaxForce         = 6f;
+        [SerializeField] private float baseNeighbourRadius  = 6f;
 
-        [Header("Wander Bounds")]
-        public float maxWanderDistance = 75f;     // Max distance from current position to pick a new point (updated to 50)
-        public float centerAvoidRadius = 15f;      // Avoid points that are within this distance from (0,0)
+        // Separation ellipse (half‑axes)
+        [SerializeField] private float baseSepSideRadius    = 3.0f; // side‑to‑side
+        [SerializeField] private float baseSepForwardRadius = 3.0f; // forward/back
 
-        [Header("Sit Chance")]
-        [Range(0f,1f)]
-        public float sitChance = 0.3f;            // Probability that the sheep decides to sit (0.3 = 30%)
+        // Rule weights (baseline)
+        [SerializeField] private float separationWeight = 1.4f; // baseline, dynamically up‑scaled
+        [SerializeField] private float alignmentWeight  = 1f;
+        [SerializeField] private float cohesionWeight   = 0.7f; // baseline, dynamically down‑scaled
 
-        [Header("Sit Duration")]
-        public float minSitTime = 20f;            // Minimum time (seconds) to remain seated (updated to 20)
-        public float maxSitTime = 45f;            // Maximum time (seconds) to remain seated (updated to 45)
+        // Density handling
+        [SerializeField] private int   maxNeighboursForFullCohesion = 16; // > this => we start suppressing cohesion
 
         [Header("Animation")]
-        public Animator animator;
-        public string walkForwardAnimation = "walk_forward";
-        public string standToSitAnimation = "stand_to_sit";
-        public string sitToStandAnimation = "sit_to_stand";
+        [SerializeField] private string walkForwardAnimation = "walk_forward";
 
-        private void Start()
+        /* ───────── per‑instance runtime values (set in Awake) ───────── */
+        private float maxSpeed, maxForce, neighbourRadius;
+        private float sepSideRadius, sepForwardRadius;
+
+        private Vector3  _velocity;
+        private Animator _anim;
+
+        private static readonly List<SheepController> _flock = new();
+
+        /* ───────── personality constants ───────── */
+        private const float VARIANCE        = 0.25f; // ±25 % variation
+        private const float JITTER_STRENGTH = 0.25f; // wander noise strength
+
+        /* ───────── Unity lifecycle ───────── */
+        private void Awake()
         {
-            if (animator == null)
-            {
-                animator = GetComponent<Animator>();
-            }
+            float V(float v) => v * Random.Range(1f - VARIANCE, 1f + VARIANCE);
 
-            // Begin the endless random walk
-            StartCoroutine(RandomWalkLoop());
+            maxSpeed        = V(baseMaxSpeed);
+            maxForce        = V(baseMaxForce);
+            neighbourRadius = V(baseNeighbourRadius);
+
+            // Keep separation radii at least one third of neighbourRadius
+            sepSideRadius    = Mathf.Max(V(baseSepSideRadius), 0.33f * neighbourRadius);
+            sepForwardRadius = Mathf.Max(V(baseSepForwardRadius), 0.33f * neighbourRadius);
+
+            _velocity = Quaternion.Euler(0, Random.Range(0, 360f), 0) * Vector3.forward * maxSpeed * 0.5f;
+            _anim     = GetComponent<Animator>();
+
+            _flock.Add(this);
         }
 
-        /// <summary>
-        /// Main loop that continuously either sits or wanders to a new point.
-        /// </summary>
-        private IEnumerator RandomWalkLoop()
+        private void OnDestroy() => _flock.Remove(this);
+
+        private void Update()
         {
-            while (true)
-            {
-                // Decide whether to sit or to move
-                if (Random.value < sitChance)
-                {
-                    yield return StartCoroutine(SitAndWait());
-                }
-                else
-                {
-                    // Pick a point around the sheep that’s more likely to be close,
-                    // and not too near the origin if possible.
-                    Vector3 randomTarget = RandomPreferredPoint();
-                    // Move there
-                    yield return StartCoroutine(MoveToTarget(randomTarget));
-                }
-            }
+            Vector3 steer = ComputeBoidSteering();
+
+            // Add small random wander (jitter)
+            Vector3 jitter = Random.insideUnitSphere; jitter.y = 0f;
+            steer += jitter * maxForce * JITTER_STRENGTH;
+
+            _velocity = Vector3.ClampMagnitude(_velocity + steer * Time.deltaTime, maxSpeed);
+
+            if (_velocity.sqrMagnitude < 0.0001f) return;
+
+            transform.position += _velocity * Time.deltaTime;
+
+            // Smoothly rotate to face travel direction
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation,
+                Quaternion.LookRotation(_velocity, Vector3.up),
+                5f * Time.deltaTime);
+
+            _anim.Play(walkForwardAnimation, 0);
         }
 
-        /// <summary>
-        /// Moves the sheep in a straight line to the given target,
-        /// rotating smoothly, then exits when close enough.
-        /// </summary>
-        private IEnumerator MoveToTarget(Vector3 target)
+        /* ────────── Boid rules with density compliance ────────── */
+        private Vector3 ComputeBoidSteering()
         {
-            while (Vector3.Distance(transform.position, target) > stoppingThreshold)
-            {
-                Vector3 direction = target - transform.position;
-                direction.y = 0f; // ignore vertical tilt
+            Vector3 pos = transform.position;
 
-                // Rotate smoothly toward target
-                if (direction.sqrMagnitude > 0.0001f)
+            Vector3 separation = Vector3.zero;
+            Vector3 alignment  = Vector3.zero;
+            Vector3 cohesion   = Vector3.zero;
+            int neighbourCount = 0;
+
+            foreach (SheepController other in _flock)
+            {
+                if (other == this) continue;
+
+                Vector3 toOther = other.transform.position - pos;
+                float   dist    = toOther.magnitude;
+
+                if (dist < neighbourRadius)
                 {
-                    Quaternion targetRot = Quaternion.LookRotation(direction, Vector3.up);
-                    transform.rotation = Quaternion.Slerp(
-                        transform.rotation,
-                        targetRot,
-                        rotationSpeed * Time.deltaTime
-                    );
-                }
+                    neighbourCount++;
+                    alignment += other._velocity;
+                    cohesion  += other.transform.position;
 
-                // Move forward
-                transform.position += transform.forward * speed * Time.deltaTime;
+                    /* ---- Oval separation with linear fall‑off ---- */
+                    Vector3 local = transform.InverseTransformDirection(toOther);
+                    float   sx = local.x / sepSideRadius;       // side axis scaled
+                    float   sz = local.z / sepForwardRadius;    // forward/back axis scaled
+                    float   inside = sx * sx + sz * sz;         // < 1 = inside oval
 
-                // Play walking animation while moving
-                if (animator != null && !string.IsNullOrEmpty(walkForwardAnimation))
-                {
-                    animator.Play(walkForwardAnimation);
-                }
-
-                yield return null; // wait one frame
-            }
-        }
-
-        /// <summary>
-        /// Plays the sit animation, waits a random amount of time, then stands up.
-        /// </summary>
-        private IEnumerator SitAndWait()
-        {
-            // Play stand-to-sit
-            if (animator != null && !string.IsNullOrEmpty(standToSitAnimation))
-            {
-                animator.Play(standToSitAnimation);
-            }
-
-            // Wait a bit to let the animation start
-            yield return new WaitForSeconds(1f);
-
-            // Remain seated for a random duration
-            float waitTime = Random.Range(minSitTime, maxSitTime);
-            yield return new WaitForSeconds(waitTime);
-
-            // Play sit-to-stand
-            if (animator != null && !string.IsNullOrEmpty(sitToStandAnimation))
-            {
-                animator.Play(sitToStandAnimation);
-            }
-
-            // Wait for stand-up animation
-            yield return new WaitForSeconds(1f);
-        }
-
-        /// <summary>
-        /// Returns a random point around the sheep that:
-        /// 1) Prefers shorter distances over longer ones (so it doesn't wander too far).
-        /// 2) Avoids the congested center near (0,0) if possible.
-        /// </summary>
-        private Vector3 RandomPreferredPoint()
-        {
-            // We'll try multiple attempts to find a suitable point
-            // that isn't too close to (0,0).
-            const int maxAttempts = 20;
-
-            for (int i = 0; i < maxAttempts; i++)
-            {
-                // We pick a distance that's more likely to be small:
-                // Using Random.value^2 skews distribution toward shorter distances.
-                float r = maxWanderDistance * (Random.value * Random.value);
-                float angle = Random.Range(0f, Mathf.PI * 2f);
-
-                // local offset from the sheep's position
-                Vector3 offset = new Vector3(r * Mathf.Cos(angle), 0f, r * Mathf.Sin(angle));
-                Vector3 candidate = transform.position + offset;
-
-                // If candidate is outside the congested center area, accept it
-                float distFromCenter = new Vector3(candidate.x, 0f, candidate.z).magnitude;
-                if (distFromCenter > centerAvoidRadius)
-                {
-                    return candidate;
+                    if (inside < 1f && dist > 0.0001f)
+                    {
+                        float strength = 1f - inside; // linear fall‑off
+                        separation += (-toOther.normalized) * strength;
+                    }
                 }
             }
 
-            // If we couldn't find a better point after many attempts,
-            // return the sheep's current position (or a minimal offset).
-            return transform.position;
+            if (neighbourCount == 0)
+                return Vector3.zero;
+
+            /* --- Density‑adaptive weighting ---------------------------------- */
+            float density   = Mathf.Clamp01(neighbourCount / (float)maxNeighboursForFullCohesion);
+            float sepW      = separationWeight * (1f + density);     // stronger when crowded
+            float cohW      = cohesionWeight   * (1f - density);     // weaker when crowded
+            float alignW    = alignmentWeight;                       // unchanged for now
+
+            /* --- Convert accumulators to steering vectors -------------------- */
+            if (cohesion.sqrMagnitude > 0.0001f)
+                cohesion = ( (cohesion / neighbourCount) - pos ).normalized * maxSpeed - _velocity;
+            if (alignment.sqrMagnitude > 0.0001f)
+                alignment = ( alignment / neighbourCount ).normalized * maxSpeed - _velocity;
+            if (separation.sqrMagnitude > 0.0001f)
+                separation = separation.normalized * maxSpeed - _velocity;
+
+            Vector3 steer =
+                  separation * sepW
+                + alignment  * alignW
+                + cohesion   * cohW;
+
+            return Vector3.ClampMagnitude(steer, maxForce);
         }
     }
 }
