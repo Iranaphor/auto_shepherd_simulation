@@ -2288,6 +2288,7 @@ GameObject:
   - component: {fileID: 5845806735159977717}
   - component: {fileID: 5845806735159977714}
   - component: {fileID: 7579366132529046038}
+  - component: {fileID: 1556825486040627185}
   m_Layer: 0
   m_Name: Black Sheep
   m_TagString: Sheep
@@ -2303,16 +2304,15 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5845806735159977712}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: 0.056415595, z: -0, w: 0.9984074}
-  m_LocalPosition: {x: -4.07, y: 0, z: -1.22}
+  m_LocalRotation: {x: -0, y: 0.006554175, z: -0, w: 0.99997854}
+  m_LocalPosition: {x: -4.95, y: 0, z: -1.25}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 6260291457481585963}
   - {fileID: 5845806734049122254}
   - {fileID: 5845806733958372697}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 6.468, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0.751, z: 0}
 --- !u!95 &5845806735159977714
 Animator:
   serializedVersion: 7
@@ -2347,18 +2347,62 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6b4720f8505271d69a75267a07794d93, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  speed: 2
-  rotationSpeed: 5
-  stoppingThreshold: 0.3
-  maxWanderDistance: 75
-  centerAvoidRadius: 15
-  sitChance: 0.3
-  minSitTime: 20
-  maxSitTime: 45
-  animator: {fileID: 0}
-  walkForwardAnimation: walk_forward
-  standToSitAnimation: stand_to_sit
-  sitToStandAnimation: sit_to_stand
+  trotSpeed: 4.5
+  amblerSpeed: 3
+  baseMaxForce: 6
+  baseNeighbourRadius: 6
+  baseSepSideRadius: 2
+  baseSepForwardRadius: 2
+  baseSeparationWeight: 0.8
+  baseAlignmentWeight: 1
+  baseCohesionWeight: 1.2
+  baseMaxNeighboursForFullCohesion: 8
+  baseSitCheckInterval: 10
+  baseSitProbability: 0.12
+  baseMinSitTime: 20
+  baseMaxSitTime: 60
+  baseDieCheckInterval: 5
+  baseDieProbability: 0.93
+  dyingSlowFactor: 0.3
+  dyingDuration: 4
+  infectionRadius: 7
+  deathSpasmForce: 3
+  standUpSlowTime: 3
+  obstacleAvoidFactor: 0.1
+  idleAnim: idle
+  walkAnim: walk_forward
+  trotAnim: trot_forward
+  standToSitAnim: stand_to_sit
+  sitIdleAnim: idle
+  sitToStandAnim: sit_to_stand
+  deathAnim: death
+--- !u!54 &1556825486040627185
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5845806735159977712}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!1 &5845806735272435853
 GameObject:
   m_ObjectHideFlags: 0
@@ -3491,111 +3535,3 @@ SkinnedMeshRenderer:
     m_Center: {x: -0.011319965, y: 0.045968413, z: -0.0026369393}
     m_Extent: {x: 0.15794687, y: 0.29036343, z: 0.22634737}
   m_DirtyAABB: 0
---- !u!1 &8243642802782174668
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 6260291457481585963}
-  - component: {fileID: 5322969703942004564}
-  - component: {fileID: 1130850753759598964}
-  - component: {fileID: 7050373382819614189}
-  m_Layer: 0
-  m_Name: Collider Cube
-  m_TagString: Sheep
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &6260291457481585963
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8243642802782174668}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.548, z: 0.06900005}
-  m_LocalScale: {x: 0.39216062, y: 0.86572254, z: 1.1756}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 5845806735159977717}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!33 &5322969703942004564
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8243642802782174668}
-  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
---- !u!23 &1130850753759598964
-MeshRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8243642802782174668}
-  m_Enabled: 1
-  m_CastShadows: 0
-  m_ReceiveShadows: 1
-  m_DynamicOccludee: 0
-  m_StaticShadowCaster: 0
-  m_MotionVectors: 1
-  m_LightProbeUsage: 1
-  m_ReflectionProbeUsage: 1
-  m_RayTracingMode: 2
-  m_RayTraceProcedural: 0
-  m_RayTracingAccelStructBuildFlagsOverride: 0
-  m_RayTracingAccelStructBuildFlags: 1
-  m_SmallMeshCulling: 1
-  m_RenderingLayerMask: 1
-  m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
-  m_StaticBatchInfo:
-    firstSubMesh: 0
-    subMeshCount: 0
-  m_StaticBatchRoot: {fileID: 0}
-  m_ProbeAnchor: {fileID: 0}
-  m_LightProbeVolumeOverride: {fileID: 0}
-  m_ScaleInLightmap: 1
-  m_ReceiveGI: 1
-  m_PreserveUVs: 0
-  m_IgnoreNormalsForChartDetection: 0
-  m_ImportantGI: 0
-  m_StitchLightmapSeams: 1
-  m_SelectedEditorRenderState: 3
-  m_MinimumChartSize: 4
-  m_AutoUVMaxDistance: 0.5
-  m_AutoUVMaxAngle: 89
-  m_LightmapParameters: {fileID: 0}
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 0
-  m_AdditionalVertexStreams: {fileID: 0}
---- !u!65 &7050373382819614189
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8243642802782174668}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 1, y: 1, z: 1}
-  m_Center: {x: 0, y: 0, z: 0}
