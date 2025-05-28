@@ -4,12 +4,12 @@
 Provided is a simulation environment using the Unity3D game engine. The environment contains controllable models for sheep and dogs. The overall goal for this group is to develop the environment to simulate the organic flocking of sheep, assess the impact of the robot dogs, and to explore the control of this influence towards achieving the target location. 
 
 ## Preparation in Advance:  
-- Ensure you have available 15GB for Unity 3D and the [ShepSim]() simulation files
-- Install [Unity Hub]() and through it, Unity Editor 6000.0.45f1
-- Following the [Getting-Started]() instructions, ensure the simulation ready to run
-- Some materials on Boids: [Coding Adventure](), [Dan.onl]()
-- Some materials on Unity: [Game Markers Toolkit]()
-- Some materials on ROS#: [Siemens/ROS-Sharp]()
+- Ensure you have available 15GB for Unity 3D and the [ShepSim](https://github.com/LCAS/auto_shepherd_simulation) simulation files
+- Install [Unity Hub](https://unity.com/download) and through it, Unity Editor 6000.0.45f1
+- Following the [Getting-Started](https://github.com/LCAS/auto_shepherd_simulation/wiki/Getting-Started) instructions, ensure the simulation ready to run
+- Some materials on Boids: [Coding Adventure](https://www.youtube.com/watch?v=bqtqltqcQhw), [Dan.onl](https://boids.dan.onl/)
+- Some materials on Unity: [Game Makers Toolkit](https://www.youtube.com/watch?v=XtQMytORBmM)
+- Some materials on ROS#: [Siemens/ROS-Sharp](https://github.com/siemens/ros-sharp)
 
 ## Activities:
 
