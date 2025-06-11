@@ -8,11 +8,13 @@ namespace Ursaanimation.CubicFarmAnimals
     [RequireComponent(typeof(Rigidbody))]
     public class SheepController : MonoBehaviour
     {
-        /* ───────── BASELINE TUNABLES ───────── */
-        private const float AMBLER_SPEED = 3.0f;
-        private const float TROT_SPEED   = 4.5f;
+        /* ───────── BASELINE TUNABLES (all private) ───────── */
+        // Speed
+        private const float AMBLER_SPEED = 3.0f;   // wandering / just‑stood speed
+        private const float TROT_SPEED   = 4.5f;   // flock speed
         private const float BASE_MAX_FORCE = 6f;
 
+        // Neighbour interaction
         private const float BASE_NEIGHBOUR_RADIUS   = 6f;
         private const float BASE_SEP_SIDE_RADIUS    = 2f;
         private const float BASE_SEP_FORWARD_RADIUS = 2f;
@@ -21,45 +23,66 @@ namespace Ursaanimation.CubicFarmAnimals
         private const float BASE_COHESION_WEIGHT    = 1.2f;
         private const int   BASE_MAX_NEIGH_FOR_COH  = 8;
 
+        // Resting
         private const float BASE_SIT_CHECK_INTERVAL = 10f;
         private const float BASE_SIT_PROBABILITY    = 0.12f;
         private const float BASE_MIN_SIT_TIME       = 20f;
         private const float BASE_MAX_SIT_TIME       = 60f;
-        private const float STAND_SLOW_TIME         = 3f;
+        private const float STAND_SLOW_TIME         = 3f;   // time after stand‑up before full speed
 
-        private const float OBSTACLE_AVOID_FACTOR   = 0.1f;
+        // Mortality / contagion
+        private const float BASE_DIE_CHECK_INTERVAL = 15f;
+        private const float BASE_DIE_PROBABILITY    = 0.00f;
+        private const float DYING_SLOW_FACTOR       = 0.6f;
+        private const float DYING_DURATION          = 3f;
+        private const float INFECTION_RADIUS        = 7f;
+
+        // Obstacle avoidance factors
+        private const float OBSTACLE_AVOID_FACTOR   = 0.1f; // fraction of neighbour radius for sleeping/dying bodies
         private const float FENCE_AVOID_RADIUS      = 3f;
         private const float FENCE_AVOID_WEIGHT      = 3f;
 
-        private const float PARAM_VARIANCE  = 0.25f;
-        private const float WEIGHT_VARIANCE = 0.30f;
+        // Randomisation ranges
+        private const float PARAM_VARIANCE  = 0.25f; // ±25 % for radii / speeds / intervals
+        private const float WEIGHT_VARIANCE = 0.30f; // ±30 % for rule weights
         private const float BASE_JITTER_STRENGTH = 0.25f;
 
+        /* ───────── ANIMATION CLIPS ───────── */
         private const string IDLE_ANIM  = "idle";
         private const string WALK_ANIM  = "walk_forward";
         private const string TROT_ANIM  = "trot_forward";
         private const string STAND2SIT_ANIM = "stand_to_sit";
         private const string SIT2STAND_ANIM = "sit_to_stand";
+        private const string DEATH_ANIM = "death";
 
+        /* ───────── RUNTIME STATE ───────── */
         private float neighbourRadius, sepSideRadius, sepForwardRadius;
         private float separationWeight, alignmentWeight, cohesionWeight;
         private int   maxNeighboursForFullCohesion;
         private float maxForce;
 
         private float sitCheckInterval, sitProbability, minSitTime, maxSitTime;
+        private float dieCheckInterval, dieProbability;
 
         private Vector3 _velocity;
         private Animator _anim;
         private Rigidbody _rb;
 
+        private enum LifeState { Alive, Dying, Dead }
+        private LifeState _life = LifeState.Alive;
         private bool _isSitting;
+
         private float _standSlowTimer;
+        private float _dyingTimer;
         private float _jitterStrength;
 
         private static readonly List<SheepController> _flock = new();
+        private readonly HashSet<SheepController> _recentContacts = new();
 
+        /* ───────── UNITY HOOKS ───────── */
         private void Awake()
         {
+            // Helpers for variance
             float V(float v) => v * Random.Range(1f - PARAM_VARIANCE, 1f + PARAM_VARIANCE);
             float W(float w) => w * Random.Range(1f - WEIGHT_VARIANCE, 1f + WEIGHT_VARIANCE);
 
@@ -79,13 +102,17 @@ namespace Ursaanimation.CubicFarmAnimals
             minSitTime       = V(BASE_MIN_SIT_TIME);
             maxSitTime       = V(BASE_MAX_SIT_TIME);
 
+            dieCheckInterval = V(BASE_DIE_CHECK_INTERVAL);
+            dieProbability   = Mathf.Clamp01(W(BASE_DIE_PROBABILITY));
+
             _jitterStrength  = W(BASE_JITTER_STRENGTH);
 
+            // start with random direction at ambler speed
             _velocity = Quaternion.Euler(0, Random.Range(0,360f),0) * Vector3.forward * AMBLER_SPEED;
 
             _anim = GetComponent<Animator>();
             _rb   = GetComponent<Rigidbody>();
-            _rb.isKinematic = true;
+            _rb.isKinematic = true; // manual movement
 
             _flock.Add(this);
         }
@@ -93,19 +120,36 @@ namespace Ursaanimation.CubicFarmAnimals
         private void Start()
         {
             StartCoroutine(RestRoutine());
+            StartCoroutine(MortalityRoutine());
         }
 
         private void OnDestroy() => _flock.Remove(this);
 
         private void Update()
         {
-            if (_isSitting) return;
+            if (_life == LifeState.Dead) return;
 
+            if (_life == LifeState.Dying)
+            {
+                UpdateDying();
+            }
+            else // Alive
+            {
+                if (!_isSitting)
+                    UpdateAlive();
+            }
+        }
+
+        /* ───────── ALIVE MOVEMENT ───────── */
+        private void UpdateAlive()
+        {
             Vector3 steering = ComputeBoidSteering();
+            // Small random wander
             Vector3 jitter = Random.insideUnitSphere; jitter.y = 0f;
             steering += jitter * maxForce * _jitterStrength;
 
-            int neighbourCount = CountNeighbours();
+            // Determine speed target
+            int neighbourCount = CountLivingNeighbours();
             float targetSpeed = (neighbourCount >= 2 && _standSlowTimer <= 0f) ? TROT_SPEED : AMBLER_SPEED;
             _velocity = Vector3.ClampMagnitude(_velocity + steering * Time.deltaTime, targetSpeed);
 
@@ -115,22 +159,59 @@ namespace Ursaanimation.CubicFarmAnimals
                 transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(_velocity, Vector3.up), 5f * Time.deltaTime);
             }
 
+            // Play appropriate locomotion animation
             string moveAnim = (_velocity.magnitude > (AMBLER_SPEED + 0.1f)) ? TROT_ANIM : WALK_ANIM;
             if (!string.IsNullOrEmpty(moveAnim)) _anim.Play(moveAnim, 0);
         }
 
-        private int CountNeighbours()
+        private int CountLivingNeighbours()
         {
             int count = 0;
             Vector3 pos = transform.position;
             foreach (var other in _flock)
             {
                 if (other == this) continue;
+                if (other._life != LifeState.Alive) continue;
                 if ((other.transform.position - pos).sqrMagnitude < neighbourRadius * neighbourRadius) count++;
             }
             return count;
         }
 
+        /* ───────── DYING PROCESS ───────── */
+        private void BeginDying()
+        {
+            if (_life != LifeState.Alive) return;
+            _life = LifeState.Dying;
+            _dyingTimer = 0f;
+            // Slow animation
+            if (!string.IsNullOrEmpty(WALK_ANIM)) _anim.Play(WALK_ANIM, 0);
+        }
+
+        private void UpdateDying()
+        {
+            _dyingTimer += Time.deltaTime;
+            float t = Mathf.Clamp01(_dyingTimer / DYING_DURATION);
+            float targetSpeed = Mathf.Lerp(AMBLER_SPEED * DYING_SLOW_FACTOR, 0f, t);
+            _velocity = Vector3.ClampMagnitude(_velocity, targetSpeed);
+            transform.position += _velocity * Time.deltaTime;
+
+            if (t >= 1f)
+            {
+                StartCoroutine(DieCoroutine());
+            }
+        }
+
+        private IEnumerator DieCoroutine()
+        {
+            _life = LifeState.Dead;
+            _velocity = Vector3.zero;
+            if (!string.IsNullOrEmpty(DEATH_ANIM)) _anim.Play(DEATH_ANIM, 0);
+            // Infect close contacts
+            InfectContacts();
+            yield return new WaitForSeconds(2.5f); // allow death anim to finish
+        }
+
+        /* ───────── BOID STEERING ───────── */
         private Vector3 ComputeBoidSteering()
         {
             Vector3 pos = transform.position;
@@ -140,20 +221,17 @@ namespace Ursaanimation.CubicFarmAnimals
             Vector3 fenceAvoid = Vector3.zero;
             int neighbourCount = 0;
 
-            // Stronger Fence avoidance (fear)
+            // --- Fence avoidance
             Collider[] fences = Physics.OverlapSphere(pos, FENCE_AVOID_RADIUS);
             foreach (var col in fences)
             {
                 if (!col.CompareTag("Fence")) continue;
                 Vector3 closest = col.ClosestPoint(pos);
-                Vector3 toFence = pos - closest; // notice: flipped direction -> away from fence
+                Vector3 toFence = closest - pos;
                 float dist = toFence.magnitude;
                 if (dist < 0.0001f) continue;
-
-                // Make the avoidance much stronger and nonlinear
-                float strength = Mathf.Clamp01((FENCE_AVOID_RADIUS - dist) / FENCE_AVOID_RADIUS);
-                strength = strength * strength; // quadratic for stronger near-field effect
-                fenceAvoid += toFence.normalized * strength * FENCE_AVOID_WEIGHT;
+                float strength = 1f - Mathf.Clamp01(dist / FENCE_AVOID_RADIUS);
+                fenceAvoid -= toFence.normalized * strength;
             }
 
             float obstacleRadius = neighbourRadius * OBSTACLE_AVOID_FACTOR;
@@ -166,20 +244,34 @@ namespace Ursaanimation.CubicFarmAnimals
                 float dist = toOther.magnitude;
                 if (dist > neighbourRadius) continue;
 
-                if (dist < obstacleRadius && dist > 0.0001f)
-                    separation += (-toOther.normalized) * ((obstacleRadius - dist) / obstacleRadius);
+                // Track for infection
+                if (other._life == LifeState.Alive)
+                {
+                    _recentContacts.Add(other);
+                    other._recentContacts.Add(this);
+                }
 
+                // Avoid dead or sitting/dying bodies with tighter radius
+                if (other._life == LifeState.Dead || other._isSitting || other._life == LifeState.Dying)
+                {
+                    if (dist < obstacleRadius && dist > 0.0001f)
+                        separation += (-toOther.normalized) * ((obstacleRadius - dist) / obstacleRadius);
+                    continue;
+                }
+
+                // Normal boid interaction
                 neighbourCount++;
                 alignment += other._velocity;
                 cohesion  += other.transform.position;
 
+                // Elliptical separation inside personal space
                 Vector3 local = transform.InverseTransformDirection(toOther);
                 float sx = local.x / sepSideRadius;
                 float sz = local.z / sepForwardRadius;
-                float inside = sx * sx + sz * sz;
+                float inside = sx * sx + sz * sz; // <1 means inside ellipse
                 if (inside < 1f && dist > 0.0001f)
                 {
-                    float strength = 1f - inside;
+                    float strength = 1f - inside; // linear fall‑off
                     separation += (-toOther.normalized) * strength;
                 }
             }
@@ -191,7 +283,7 @@ namespace Ursaanimation.CubicFarmAnimals
                 Vector3 toCentre = centre - pos;
                 float densityFactor = Mathf.Clamp01((float)neighbourCount / maxNeighboursForFullCohesion);
                 cohesion = toCentre.normalized * TROT_SPEED - _velocity;
-                cohesion *= (1f - densityFactor);
+                cohesion *= (1f - densityFactor); // fade cohesion in dense clusters
             }
 
             separation = separation.normalized * TROT_SPEED - _velocity;
@@ -200,19 +292,18 @@ namespace Ursaanimation.CubicFarmAnimals
                 separation * separationWeight +
                 alignment  * alignmentWeight  +
                 cohesion   * cohesionWeight   +
-                fenceAvoid;  // already scaled above
+                fenceAvoid.normalized * FENCE_AVOID_WEIGHT;
 
             return Vector3.ClampMagnitude(steer, maxForce);
         }
 
-
-
+        /* ───────── COROUTINES ───────── */
         private IEnumerator RestRoutine()
         {
             while (true)
             {
                 yield return new WaitForSeconds(sitCheckInterval);
-                if (_isSitting) continue;
+                if (_life != LifeState.Alive || _isSitting) continue;
                 if (Random.value < sitProbability)
                 {
                     StartCoroutine(SitCoroutine());
@@ -222,10 +313,10 @@ namespace Ursaanimation.CubicFarmAnimals
 
         private IEnumerator SitCoroutine()
         {
-            if (_isSitting) yield break;
+            if (_isSitting || _life != LifeState.Alive) yield break;
             _isSitting = true;
             if (!string.IsNullOrEmpty(STAND2SIT_ANIM)) _anim.Play(STAND2SIT_ANIM, 0);
-            yield return new WaitForSeconds(1f);
+            yield return new WaitForSeconds(1f); // transition
 
             float wait = Random.Range(minSitTime, maxSitTime);
             yield return new WaitForSeconds(wait);
@@ -233,7 +324,32 @@ namespace Ursaanimation.CubicFarmAnimals
             if (!string.IsNullOrEmpty(SIT2STAND_ANIM)) _anim.Play(SIT2STAND_ANIM, 0);
             yield return new WaitForSeconds(1f);
             _isSitting = false;
-            _standSlowTimer = STAND_SLOW_TIME;
+            _standSlowTimer = STAND_SLOW_TIME; // start slow
+        }
+
+        private IEnumerator MortalityRoutine()
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(dieCheckInterval);
+                if (_life != LifeState.Alive) continue;
+                if (Random.value < dieProbability)
+                {
+                    BeginDying();
+                }
+            }
+        }
+
+        private void InfectContacts()
+        {
+            foreach (var sheep in _recentContacts)
+            {
+                if (sheep == null) continue;
+                if (sheep._life != LifeState.Alive) continue;
+                if ((sheep.transform.position - transform.position).sqrMagnitude > INFECTION_RADIUS * INFECTION_RADIUS) continue;
+                sheep.Invoke(nameof(sheep.BeginDying), Random.Range(0.5f, 2f));
+            }
+            _recentContacts.Clear();
         }
     }
 }
